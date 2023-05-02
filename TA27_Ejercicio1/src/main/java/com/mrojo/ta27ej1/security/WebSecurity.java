@@ -1,52 +1,67 @@
 package com.mrojo.ta27ej1.security;
 
-import static com.mrojo.ta27ej1.security.Constants.LOGIN_URL;
-
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
-import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web.configuration.WebSecurityConfiguration;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import com.mrojo.ta27ej1.service.UsuarioDetailsServiceImpl;
+
 @Configuration
 @EnableWebSecurity
-public class WebSecurity extends WebSecurityConfiguration {
+public class WebSecurity {
 
-	private UserDetailsService userDetailsService;
+	private UsuarioDetailsServiceImpl usuarioDetails;
 
-	public WebSecurity(UserDetailsService userDetailsService) {
-		this.userDetailsService = userDetailsService;
+	private JwtAuthEntryPoint jwtAuthEntryPoint;
+
+	@Autowired
+	public WebSecurity(UsuarioDetailsServiceImpl usuarioDetailsServiceImpl, JwtAuthEntryPoint jwtAuthEntryPoint) {
+		this.usuarioDetails = usuarioDetailsServiceImpl;
+		this.jwtAuthEntryPoint = jwtAuthEntryPoint;
 	}
 
 	@Bean
-	public BCryptPasswordEncoder bCryptPasswordEncoder() {
-		return new BCryptPasswordEncoder();
-	}
-
-	protected void configure(HttpSecurity httpSecurity) throws Exception {
+	SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 		/*
 		 * 1. Se desactiva el uso de cookies 2. Se activa la configuración CORS con los
 		 * valores por defecto 3. Se desactiva el filtro CSRF 4. Se indica que el login
 		 * no requiere autenticación 5. Se indica que el resto de URLs esten securizadas
 		 */
-		httpSecurity.sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS).and().cors().and()
-				.csrf().disable().authorizeRequests().antMatchers(HttpMethod.POST, LOGIN_URL).permitAll().anyRequest()
-				.authenticated().and().addFilter(new JWTAuthenticationFilter(authenticationManager()))
-				.addFilter(new JWTAuthorizationFilter(authenticationManager()));
+		http.sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS).and().cors().and().csrf()
+				.disable().exceptionHandling().authenticationEntryPoint(jwtAuthEntryPoint).and().authorizeHttpRequests()
+				.requestMatchers(HttpMethod.POST, "/register").permitAll().requestMatchers(HttpMethod.POST, "/login")
+				.permitAll().anyRequest().authenticated().and()
+				.addFilterBefore(jwtAuthenticationFilter(), UsernamePasswordAuthenticationFilter.class);
+
+		return http.build();
 	}
 
-	public void configure(AuthenticationManagerBuilder auth) throws Exception {
-		// Se define la clase que recupera los usuarios y el algoritmo para procesar las
-		// passwords
-		auth.userDetailsService(userDetailsService).passwordEncoder(bCryptPasswordEncoder());
+	@Bean
+	AuthenticationManager authenticationManager(AuthenticationConfiguration auth_config) throws Exception {
+		return auth_config.getAuthenticationManager();
+	}
+
+	@Bean
+	PasswordEncoder PasswordEncoder() {
+		return new BCryptPasswordEncoder();
+	}
+
+	@Bean
+	JWTAuthenticationFilter jwtAuthenticationFilter() {
+		return new JWTAuthenticationFilter();
 	}
 
 	@Bean

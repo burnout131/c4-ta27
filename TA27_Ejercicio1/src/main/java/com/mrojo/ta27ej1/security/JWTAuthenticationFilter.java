@@ -1,67 +1,54 @@
 package com.mrojo.ta27ej1.security;
 
-import static com.mrojo.ta27ej1.security.Constants.HEADER_AUTHORIZACION_KEY;
-import static com.mrojo.ta27ej1.security.Constants.ISSUER_INFO;
-import static com.mrojo.ta27ej1.security.Constants.SUPER_SECRET_KEY;
-import static com.mrojo.ta27ej1.security.Constants.TOKEN_BEARER_PREFIX;
-import static com.mrojo.ta27ej1.security.Constants.TOKEN_EXPIRATION_TIME;
-
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Date;
 
-import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.AuthenticationException;
-import org.springframework.security.core.userdetails.User;
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+import org.springframework.util.StringUtils;
+import org.springframework.web.filter.OncePerRequestFilter;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.mrojo.ta27ej1.dto.Usuario;
+import com.mrojo.ta27ej1.service.UsuarioDetailsServiceImpl;
 
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.SignatureAlgorithm;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
-public class JWTAuthenticationFilter extends UsernamePasswordAuthenticationFilter {
+public class JWTAuthenticationFilter extends OncePerRequestFilter {
 
-	private AuthenticationManager authenticationManager;
+	@Autowired
+	private JwtGenerator tokenGenerator;
 
-	public JWTAuthenticationFilter(AuthenticationManager authenticationManager) {
-		this.authenticationManager = authenticationManager;
-	}
+	@Autowired
+	private UsuarioDetailsServiceImpl usuarioDetailsService;
 
 	@Override
-	public Authentication attemptAuthentication(HttpServletRequest request, HttpServletResponse response)
-			throws AuthenticationException {
-		try {
-			Usuario credenciales = new ObjectMapper().readValue(request.getInputStream(), Usuario.class);
+	protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+			throws ServletException, IOException {
+		String token = getJWTFromRequest(request);
+		if (StringUtils.hasText(token) && tokenGenerator.validateToken(token)) {
+			String username = tokenGenerator.getUserNameFromJwt(token);
 
-			return authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(
-					credenciales.getUsername(), credenciales.getPassword(), new ArrayList<>()));
-		} catch (IOException e) {
-			throw new RuntimeException(e);
+			UserDetails userDetails = usuarioDetailsService.loadUserByUsername(username);
+			UsernamePasswordAuthenticationToken authenticationToken = new UsernamePasswordAuthenticationToken(
+					userDetails, null, userDetails.getAuthorities());
+
+			authenticationToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+			SecurityContextHolder.getContext().setAuthentication(authenticationToken);
 		}
+		filterChain.doFilter(request, response);
+
 	}
 
-	@Override
-	protected void successfulAuthentication(HttpServletRequest request, HttpServletResponse response, FilterChain chain,
-			Authentication auth) throws IOException, ServletException {
-
-		String token = Jwts.builder().setIssuedAt(new Date()).setIssuer(ISSUER_INFO)
-				.setSubject(((User)auth.getPrincipal()).getUsername())
-				.setExpiration(new Date(System.currentTimeMillis() + TOKEN_EXPIRATION_TIME))
-				.signWith(SignatureAlgorithm.HS512, SUPER_SECRET_KEY).compact();
-		response.addHeader(HEADER_AUTHORIZACION_KEY, TOKEN_BEARER_PREFIX + " " + token);//devuelve token por cabecera
-		response.getWriter().write("{\"token\": \"" + token + "\"}");//devuelve token por body
-		System.out.println(response.getHeader(HEADER_AUTHORIZACION_KEY));
-	
+	private String getJWTFromRequest(HttpServletRequest request) {
+		String bearerToken = request.getHeader("Authorization");
+		if (StringUtils.hasText(bearerToken) && bearerToken.startsWith("Bearer ")) {
+			return bearerToken.substring(7, bearerToken.length());
+		}
+		return null;
 	}
-	
-	
-	
+
 }
